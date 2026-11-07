@@ -17,6 +17,9 @@ jobs:
           f=src/app/src/main/AndroidManifest.xml
           sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">|' $f
           sed -i 's|android:allowBackup="false"|android:allowBackup="false" tools:replace="android:allowBackup"|' $f
+      - name: Fix Td.kt contacts
+        run: |
+          sed -i 's/= ids\.mapNotNull/= ids.toList().mapNotNull/' src/app/src/main/java/com/mahan/mahantgram/Td.kt
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
