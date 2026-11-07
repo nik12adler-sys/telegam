@@ -12,6 +12,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Unzip project
         run: unzip -q project-tdlib.zip -d src
+      - name: Fix manifest merge conflict
+        run: |
+          f=src/app/src/main/AndroidManifest.xml
+          sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">|' $f
+          sed -i 's|android:allowBackup="false"|android:allowBackup="false" tools:replace="android:allowBackup"|' $f
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
