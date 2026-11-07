@@ -25,11 +25,16 @@ jobs:
         with:
           gradle-version: 8.10.2
       - name: Build debug APK
+        shell: bash
         working-directory: src
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon --console=plain 2>&1 | tee ../build.log
+      - name: Show errors
+        if: failure()
+        run: |
+          grep -E "^e: " build.log | sed 's|file:///home/runner/work/telegam/telegam/src/app/src/main/java/com/mahan/mahantgram/||' | cut -c1-220
       - uses: actions/upload-artifact@v4
         with:
           name: MahanTgram-apk
