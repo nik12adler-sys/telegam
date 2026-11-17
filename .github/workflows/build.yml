@@ -1,44 +1,70 @@
-name: Build APK
+name: Build MahanTgram (Android APK + Linux .deb)
 
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
+  android:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Unzip project
-        run: unzip -q project-tdlib.zip -d src
-      - name: Fix manifest merge conflict
-        run: |
-          f=src/app/src/main/AndroidManifest.xml
-          sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">|' $f
-          sed -i 's|android:allowBackup="false"|android:allowBackup="false" tools:replace="android:allowBackup"|' $f
-      - name: Fix Td.kt contacts
-        run: |
-          sed -i 's/= ids\.mapNotNull/= ids.toList().mapNotNull/' src/app/src/main/java/com/mahan/mahantgram/Td.kt
       - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
+        with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.10.2
-      - name: Build debug APK
-        shell: bash
-        working-directory: src
+        with: { gradle-version: 8.10.2 }
+      - name: Build APKs
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
-        run: gradle assembleDebug --no-daemon --console=plain 2>&1 | tee ../build.log
-      - name: Show errors
-        if: failure()
-        run: |
-          grep -E "^e: " build.log | sed 's|file:///home/runner/work/telegam/telegam/src/app/src/main/java/com/mahan/mahantgram/||' | cut -c1-220
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: MahanTgram-apk
-          path: src/app/build/outputs/apk/debug/*.apk
+          name: mahantgram-android-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: 8.10.2 }
+
+      - name: TDLib build deps
+        run: sudo apt-get update && sudo apt-get install -y make git zlib1g-dev libssl-dev gperf php-cli cmake g++ fakeroot dpkg-dev
+
+      # TDLib is compiled from source so the Java classes (org.drinkless.tdlib.*) are the very same
+      # package the Android code already imports, and libtdjni.so matches them exactly.
+      - name: Cache TDLib
+        id: tdcache
+        uses: actions/cache@v4
+        with:
+          path: |
+            desktop/libs/tdlib.jar
+            desktop/resources-native/linux-x64/libtdjni.so
+          key: tdlib-linux-v1
+
+      - name: Build TDLib (JNI)
+        if: steps.tdcache.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/tdlib/td.git /tmp/td
+          cd /tmp/td
+          # Pin to the 1.8.56 line (same version as the Android dependency). Falls back to master.
+          NEXT=$(git log --format=%H -S'VERSION 1.8.57' -- CMakeLists.txt | tail -1 || true)
+          CUR=$(git log --format=%H -S'VERSION 1.8.56' -- CMakeLists.txt | tail -1 || true)
+          if [ -n "$NEXT" ]; then git checkout "${NEXT}^"; elif [ -n "$CUR" ]; then git checkout "$CUR"; fi
+          git log -1 --oneline
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DTD_ENABLE_JNI=ON -DCMAKE_INSTALL_PREFIX:PATH=../example/java/td ..
+          cmake --build . --target install -j"$(nproc)"
+          cd ../example/java && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DTd_DIR:PATH="$(readlink -e ../td/lib/cmake/Td)" -DCMAKE_INSTALL_PREFIX:PATH=/tmp/tdout ..
+          cmake --build . --target install -j"$(nproc)"
+          cd /tmp/td
+          mkdir -p /tmp/tdclasses
+          javac -d /tmp/tdclasses $(find /tmp/tdout /tmp/td/example/java -path '*org/drinkless/tdlib/*.java' | sort -u)
+          j
